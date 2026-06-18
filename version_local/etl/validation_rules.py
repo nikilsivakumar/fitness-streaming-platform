@@ -198,7 +198,7 @@ def validate_user_profile(df):
     )
     df = _apply_rule(
         df,
-        F.col("weight").isNotNull() & ~F.col("weight").between(30, 250),
+        F.col("weight_kg").isNotNull() & ~F.col("weight_kg").between(30, 250),
         "weight_out_of_range"
     )
     return df
