@@ -112,6 +112,7 @@ def run_producer(num_cycles: int = 5, records_per_cycle: int = 20):
                 generate_workout_log,
                 generate_sleep_log,
                 generate_nutrition_snapshot,
+                generate_user_profile,
             ]
             record = generators[_ % len(generators)](user_id)
             batch.append(record)
