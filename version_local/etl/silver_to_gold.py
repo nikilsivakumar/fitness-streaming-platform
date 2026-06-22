@@ -130,6 +130,7 @@ import logging
 from datetime import datetime
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql import Window
 from pyspark.sql.types import ArrayType, StringType
 
 # -------------------------------------------------
@@ -467,14 +468,39 @@ def build_gold_community_analytics(df_wearable, df_sleep, df_workout):
 
 def build_gold_user_profile_enriched(df_user_profile):
     """
-    Grain: one row per user_id. Straight pass-through of the corrected
-    Silver user_profile table (post weight_kg bugfix), selected down to
-    the columns useful for downstream dashboard/dbt joins. No new
-    computation here — this exists so Phase 7 (dbt) and Phase 8
-    (Streamlit) have a clean, stable dimension to join against without
-    needing to know about medical_conditions.csv or gym_master.csv at all.
+    Grain: one row per user_id — the CURRENT (most recent) profile state.
+
+    user_profile arrives on the stream as low-frequency CDC-style events
+    (see wearable_simulator.generate_user_profile docstring): each event
+    represents "this user's profile as of timestamp X", and the SAME
+    user_id intentionally appears multiple times across the stream with
+    DIFFERENT attribute values, simulating profile changes over time
+    (job_type change, medical diagnosis, gym switch, etc.).
+
+    BUG FOUND AND FIXED HERE (same family as the weight_kg bug):
+    The original version of this function did a flat .select() with no
+    dedup, despite this docstring's own "one row per user_id" claim.
+    On a small sample (Local Phase 4, 7 rows) this went unnoticed because
+    duplicate user_ids happened not to collide. It surfaced clearly on
+    the AWS run (Phase 5) once volume was high enough that the same
+    user_id legitimately repeated within one batch. Caught by inspecting
+    real Gold output and noticing one user_id with conflicting gym_id /
+    medical_history values across rows - not by reviewing this docstring,
+    which had been asserting the correct grain the whole time.
+
+    This Gold table is a TYPE 1 (current-state-only) dimension: keep the
+    latest row per user_id, discard prior states. Full history is still
+    available upstream in Silver for the future dbt snapshot layer
+    (Phase 7), which will implement true SCD Type 2 versioning.
     """
-    return df_user_profile.select(
+    w = Window.partitionBy("user_id").orderBy(F.col("timestamp").desc())
+    df_latest = (
+        df_user_profile
+        .withColumn("_rn", F.row_number().over(w))
+        .filter(F.col("_rn") == 1)
+        .drop("_rn")
+    )
+    return df_latest.select(
         "user_id", "age", "gender", "weight_kg",
         "medical_history", "medical_risk_modifier",
         "job_type", "fitness_goal", "gym_id", "gym_type",
