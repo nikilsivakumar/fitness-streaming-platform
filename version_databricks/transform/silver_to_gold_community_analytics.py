@@ -64,11 +64,34 @@ wearable_with_cohort = wearable_df.join(user_cohort_lookup, on="user_id", how="l
 sleep_with_cohort = sleep_df.join(user_cohort_lookup, on="user_id", how="left")
 workout_with_cohort = workout_df.join(user_cohort_lookup, on="user_id", how="left")
 
-# Sanity check: cohort join should not introduce nulls if every user_id
-# in these tables also exists in user_profile -- if this prints > 0,
-# investigate before trusting the cohort aggregates below.
-unmatched = wearable_with_cohort.filter(F.col("job_type").isNull()).select("user_id").distinct().count()
-print(f"wearable_event users with NO cohort match: {unmatched}")
+# Known, expected gap (not a bug): user_profile is a deliberately
+# low-frequency (5%) CDC-style event in the producer, so a finite test
+# batch will always leave some users with wearable/sleep/workout rows
+# but no profile row yet -- a textbook "early-arriving fact, late-
+# arriving dimension" gap (Kimball). Rather than letting these surface
+# as a silent job_type=null, fitness_goal=null row at Gold (which would
+# break row-count reconciliation against Silver), label them explicitly
+# so the gap is visible and intentional. See decisions.md.
+UNPROFILED = "Unprofiled"
+
+wearable_with_cohort = wearable_with_cohort.fillna(
+    {"job_type": UNPROFILED, "fitness_goal": UNPROFILED}
+)
+sleep_with_cohort = sleep_with_cohort.fillna(
+    {"job_type": UNPROFILED, "fitness_goal": UNPROFILED}
+)
+workout_with_cohort = workout_with_cohort.fillna(
+    {"job_type": UNPROFILED, "fitness_goal": UNPROFILED}
+)
+
+# Informational, not a failure condition: this count is *expected* to be
+# > 0 on a finite test batch. Flag for investigation only if it stops
+# shrinking as more producer batches run, or if it's unexpectedly large
+# relative to total distinct users -- that would point to a producer or
+# ingestion problem rather than normal CDC lag.
+unmatched = wearable_df.join(user_cohort_lookup, on="user_id", how="left") \
+    .filter(F.col("job_type").isNull()).select("user_id").distinct().count()
+print(f"wearable_event users with NO cohort match (-> 'Unprofiled' bucket): {unmatched}")
 
 # COMMAND ----------
 
@@ -154,3 +177,7 @@ assert expected_cohorts == actual_rows, "MISMATCH - investigate before proceedin
 print("Verified: row count matches expected cohort count.")
 
 display(spark.table(gold_table))
+
+# COMMAND ----------
+
+
