@@ -49,6 +49,10 @@
 
 # COMMAND ----------
 
+# MAGIC %restart_python
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ### Step 1 — Read Bronze, keep only each user's newest row
 # MAGIC Same row_number()-over-timestamp pattern as Local's bronze_to_silver.py
@@ -171,6 +175,65 @@ print(f"Quarantine-bound this run : {df_quarantine_incoming.count()}")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Step 4.5 — Reference-data enrichment (gap fix)
+# MAGIC Local/AWS add `medical_risk_modifier` (from medical_conditions.csv) and
+# MAGIC `gym_type` (from gym_master.csv) during Bronze->Silver enrichment -- this
+# MAGIC notebook originally skipped that join. Caught by checking the REAL Silver
+# MAGIC schema before building Gold against it, not by re-reading this notebook's
+# MAGIC own docstrings (same discipline as every other bug this project has caught).
+# MAGIC
+# MAGIC Reference CSVs live in a Unity Catalog Volume, not the Git-synced repo --
+# MAGIC the repo doesn't carry /data (matches how raw_events needed an explicit
+# MAGIC CREATE VOLUME in DB-1; arbitrary paths aren't enough).
+# MAGIC
+# MAGIC Enabling schema evolution explicitly here because the Silver table already
+# MAGIC exists from the first run -- MERGE INTO does not auto-widen an existing
+# MAGIC table's schema the way mode("overwrite") would; this opt-in is required or
+# MAGIC the merge below throws AnalysisException on the two new columns.
+
+# COMMAND ----------
+
+# COMMAND ----------
+
+print(df_silver_incoming.columns)
+print(len(df_silver_incoming.columns))
+
+# COMMAND ----------
+
+REFERENCE_VOLUME = "/Volumes/fitness_streaming/reference/files"
+
+medical_conditions = (
+    spark.read.option("header", True).option("inferSchema", True)
+    .csv(f"{REFERENCE_VOLUME}/medical_conditions.csv")
+)
+gym_master = (
+    spark.read.option("header", True).option("inferSchema", True)
+    .csv(f"{REFERENCE_VOLUME}/gym_master.csv")
+)
+
+if "medical_risk_modifier" not in df_silver_incoming.columns:
+    df_silver_incoming = df_silver_incoming.join(
+        medical_conditions.select(
+            F.col("condition").alias("medical_history"),
+            F.col("risk_modifier").alias("medical_risk_modifier")
+        ),
+        on="medical_history",
+        how="left"
+    ).fillna({"medical_risk_modifier": 1.0})
+
+if "gym_type" not in df_silver_incoming.columns:
+    df_silver_incoming = df_silver_incoming.join(
+        gym_master.select("gym_id", "gym_type"),
+        on="gym_id",
+        how="left"
+    )
+
+print("Columns after enrichment:", df_silver_incoming.columns)
+display(df_silver_incoming.select("user_id", "medical_history", "medical_risk_modifier", "gym_id", "gym_type"))
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Step 5 — MERGE INTO Silver (the new part)
 # MAGIC First run: table doesn't exist yet, so we create it directly from
 # MAGIC the incoming data. Every subsequent run: MERGE -- existing user_id
@@ -190,24 +253,19 @@ if not table_exists:
     df_silver_incoming.write.format("delta").saveAsTable(silver_table)
     print(f"Created {silver_table} with {df_silver_incoming.count()} rows")
 else:
-    from delta.tables import DeltaTable
+    df_silver_incoming.createOrReplaceTempView("source_updates")
 
-    silver_dt = DeltaTable.forName(spark, silver_table)
-
-    (
-        silver_dt.alias("target")
-        .merge(
-            df_silver_incoming.alias("source"),
-            "target.user_id = source.user_id"
-        )
-        .whenMatchedUpdateAll()
-        .whenNotMatchedInsertAll()
-        .execute()
-    )
+    spark.sql(f"""
+        MERGE WITH SCHEMA EVOLUTION INTO {silver_table} AS target
+        USING source_updates AS source
+        ON target.user_id = source.user_id
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
 
     history = spark.sql(f"DESCRIBE HISTORY {silver_table} LIMIT 1")
     display(history.select("version", "timestamp", "operation", "operationMetrics"))
-
+    
 print(f"\n{silver_table} now has {spark.table(silver_table).count()} total row(s)")
 
 # COMMAND ----------
@@ -248,3 +306,7 @@ else:
 print("Distinct users in Silver:", spark.table(silver_table).select("user_id").distinct().count())
 print("Total rows in Silver:    ", spark.table(silver_table).count())
 display(spark.table(silver_table).orderBy("user_id"))
+
+# COMMAND ----------
+
+
