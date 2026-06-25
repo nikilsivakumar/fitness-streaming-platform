@@ -129,4 +129,4 @@ Full rationale for each of these — including what was tried and rejected — l
 
 ## Author
 
-Nikil — Data Analyst (Chennai) transitioning into Data Engineering. This project, alongside an earlier AWS retail sales analytics pipeline (S3/Glue/Redshift/dbt), forms the core of a comparative portfolio aimed at demonstrating platform-independent data engineering judgment.
+Nikil 
