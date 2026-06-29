@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: mart_user_health_score
+    description: >
+      One row per user per day. fact_fatigue_recovery joined to the
+      dim_user row that was actually active on event_date (point-in-time
+      SCD2 join), not just whichever dim_user row is_current today.
+    columns:
+      - name: fact_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests: [not_null]
+      - name: fatigue_score
+        tests: [not_null]
+      - name: risk_adjusted_fatigue_score
+        tests: [not_null]
+
+  - name: mart_coach_dashboard
+    description: >
+      One row per user (cumulative). fact_workout_consistency joined to
+      dim_user WHERE is_current = true — correct for this fact since it
+      has no date grain to look up historically.
+    columns:
+      - name: fact_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests: [not_null]
+      - name: completion_rate_pct
+        tests: [not_null]
+
+  - name: mart_community_analytics
+    description: One row per (job_type, fitness_goal) cohort, with a readiness label added.
+    columns:
+      - name: fact_id
+        tests: [unique, not_null]
+      - name: cohort_readiness_label
+        tests:
+          - accepted_values:
+              values: ['high_readiness', 'moderate_readiness', 'low_readiness']

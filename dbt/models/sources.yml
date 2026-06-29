@@ -1,0 +1,53 @@
+version: 2
+
+sources:
+  - name: fitness_star_schema
+    database: fitness_dw
+    schema: public
+    description: >
+      Star schema loaded into Redshift via COPY from S3 Gold Parquet output
+      (Glue Silver→Gold job). dim_user is true SCD Type 2. Confirmed via
+      live introspection (dbt run-operation list_schema_columns) on
+      2026-06-26 — not assumed from the Glue script's S3 output shape.
+    tables:
+      - name: dim_user
+        description: SCD Type 2 user dimension. Multiple rows per user_id, one per attribute-change period.
+        columns:
+          - name: user_sk
+            description: Surrogate key, identity column.
+          - name: user_id
+            description: Natural/business key. Not unique alone — combine with effective_date/end_date for point-in-time lookups.
+          - name: effective_date
+          - name: end_date
+            description: NULL or far-future for the current row, depending on load convention — confirm which before relying on it.
+          - name: is_current
+            description: True for the single currently-active row per user_id.
+
+      - name: fact_fatigue_recovery
+        description: One row per user per day. Has event_date — must join dim_user point-in-time, not just on is_current.
+        columns:
+          - name: fact_id
+          - name: user_id
+          - name: event_date
+
+      - name: fact_workout_consistency
+        description: One cumulative row per user (no date column) — join to dim_user WHERE is_current is correct here, unlike the fatigue_recovery fact.
+        columns:
+          - name: fact_id
+          - name: user_id
+          - name: muscle_group_breakdown
+            description: Redshift SUPER (semi-structured) type — passed through as-is in staging, not flattened.
+
+      - name: fact_community_analytics
+        description: Pre-aggregated by job_type/fitness_goal cohort. No user-level grain, no join to dim_user needed.
+        columns:
+          - name: fact_id
+          - name: job_type
+          - name: fitness_goal
+
+    # NOTE: stg_fatigue_recovery and stg_user_profile exist in this schema
+    # but are NOT declared as sources here. They appear to be leftovers
+    # from an earlier load attempt (same shape as the real fact/dim tables,
+    # minus fact_id/SCD2 columns) rather than part of the actual star
+    # schema. Confirm with the data owner whether they can be dropped from
+    # Redshift before they're forgotten and mistaken for real sources later.

@@ -1,0 +1,60 @@
+version: 2
+
+models:
+  - name: stg_dim_user
+    description: 1:1 staging view over the SCD2 user dimension.
+    columns:
+      - name: user_sk
+        tests: [unique, not_null]
+      - name: user_id
+        tests: [not_null]
+      - name: is_current
+        tests: [not_null]
+      - name: effective_date_for_join
+        description: >
+          Corrected join boundary — open-ended ('1900-01-01') for each
+          user's earliest SCD2 row, since raw effective_date was confirmed
+          to be a load timestamp, not a business-validity date. See
+          decisions.md §3.12.
+        tests: [not_null]
+
+  - name: stg_fact_fatigue_recovery
+    description: 1:1 staging view over the daily fatigue/recovery fact.
+    columns:
+      - name: fact_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_dim_user')
+                field: user_id
+      - name: fatigue_score
+        tests:
+          - not_null
+      - name: recovery_readiness
+        tests:
+          - not_null
+
+  - name: stg_fact_workout_consistency
+    description: 1:1 staging view over the cumulative workout-consistency fact.
+    columns:
+      - name: fact_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_dim_user')
+                field: user_id
+      - name: completion_rate_pct
+        tests:
+          - not_null
+
+  - name: stg_fact_community_analytics
+    description: 1:1 staging view over the pre-aggregated cohort fact.
+    columns:
+      - name: fact_id
+        tests: [unique, not_null]

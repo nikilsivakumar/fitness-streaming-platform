@@ -1,0 +1,24 @@
+# profiles.yml.example
+#
+# This is a TEMPLATE. Real credentials are never committed.
+#
+# Setup:
+#   1. Copy this file to ~/.dbt/profiles.yml (NOT into the repo)
+#   2. Set the env vars below in your shell / .env before running dbt
+#   3. REDSHIFT_SCHEMA is whatever schema your star schema tables
+#      (dim_user, fact_fatigue_recovery, etc.) actually live in —
+#      run the introspection macro first if you're not sure.
+
+fitness_streaming_aws:
+  target: dev
+  outputs:
+    dev:
+      type: redshift
+      host: "{{ env_var('REDSHIFT_HOST') }}"          # e.g. fitness-workgroup.<account>.ap-south-1.redshift-serverless.amazonaws.com
+      port: 5439
+      dbname: "{{ env_var('REDSHIFT_DBNAME', 'dev') }}"
+      user: "{{ env_var('REDSHIFT_USER') }}"
+      password: "{{ env_var('REDSHIFT_PASSWORD') }}"
+      schema: "{{ env_var('REDSHIFT_SCHEMA') }}"
+      threads: 4
+      sslmode: require
