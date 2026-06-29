@@ -82,10 +82,24 @@ Each stack made genuinely different trade-offs given its constraints — not bec
 
 | Track | Status |
 |---|---|
-| **Local** | Phases 1–4 complete and committed. **Scope intentionally capped here** — Local was always a proof-of-logic stack, not a deployment target; see `docs/decisions.md §1.10`. |
-| **AWS** | Bronze→Silver→Gold Glue jobs complete and verified. Redshift Serverless provisioned, star schema with SCD Type 2 on `dim_user` built, Gold loaded via Data API. Phase 7 (dbt on Redshift) **deliberately deferred**, sequenced after Databricks stabilization — now due. |
-| **Databricks** | DB-1 through DB-5 complete and verified. All four Gold tables built; Databricks Workflows running an 11-task DAG end-to-end in ~5 minutes. DB-6–DB-8 (orchestration write-up, AWS-vs-Databricks comparison docs) in progress. |
-| **Shared docs** | `decisions.md` and `interview_qa.md` drafted. README (this file) in progress. Master Word reference document — reconciling `databricks_workshop.docx` and `pipeline_reference.docx` — not yet started. |
+| **Local** | Phases 1–4 complete and committed. **Scope intentionally capped here, permanently** — Local was always a proof-of-logic stack, not a deployment target; see `docs/decisions.md §1.10`. Streamlit/dbt-on-DuckDB/local orchestration deliberately not built. |
+| **AWS** | **Fully complete, Phases 5–7.** Kinesis→Lambda→S3 Bronze, Glue Bronze→Silver→Gold, Glue Crawler + Athena, Redshift Serverless star schema with true SCD Type 2 on `dim_user`, and dbt (Redshift profile) all built and verified end-to-end. Schema exported to `version_aws/redshift/schema.sql`. |
+| **Databricks** | DB-1 through DB-5 complete and verified — Unity Catalog, Auto Loader Bronze ingestion, all 5 Silver notebooks, all 4 Gold tables, and an 11-task Databricks Workflows DAG running end-to-end in ~5 minutes. DB-6–DB-8 (SQL dashboard, orchestration write-up, AWS-vs-Databricks comparison) folded directly into the handbook rather than built as standalone docs. |
+| **Shared docs** | `decisions.md` (now including an extended-architecture section on alternative endpoints — Snowflake, BI tools, SageMaker, and Databricks-side dashboarding/Snowflake interop) and `interview_qa.md` (50+ entries) complete. **Master handbook** — the agreed final deliverable, covering full architecture comparison, step-by-step build process, interview/scaling/failure scenarios — complete. |
+
+---
+
+## Beyond the current build — possible extensions
+
+This project's two real endpoints are Redshift Serverless (AWS) and Unity Catalog Delta tables (Databricks). Neither is the *only* possible endpoint, and reasoning through the realistic alternatives — without building all of them — is itself documented as part of the project's interview material:
+
+- **Could Redshift be replaced or supplemented by Snowflake?** Yes, via a storage integration reading Parquet directly from S3 — but it lives in a completely separate vendor account, not inside AWS.
+- **What BI layer would sit on top of Redshift?** QuickSight (stays inside the AWS account/billing boundary) vs. Tableau/Power BI (separate vendor SaaS, same Redshift-networking friction already documented for dbt sessions).
+- **When would this project actually use SageMaker?** Not as a warehouse/BI replacement — as a parallel branch off Silver/Gold for predictive overtraining risk, PT-client churn risk, or unsupervised cohort discovery, with an explicit case for why the current rule-based scoring stays interpretable and isn't simply replaced by a model.
+- **How would a dashboard get built off the Databricks Gold tables?** Lakeview (native), Databricks Apps running Streamlit, or Power BI/Tableau via Partner Connect.
+- **Can the Databricks endpoint become Snowflake too?** Yes — via Delta Sharing (open, no-copy), Lakehouse Federation (the reverse direction), or a plain Parquet export, each a different real-world reason to do it.
+
+Full reasoning for all of the above, including why none of it was built for this project's scope, is in [`docs/decisions.md §6`](docs/decisions.md).
 
 ---
 
